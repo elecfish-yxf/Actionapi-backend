@@ -11,8 +11,12 @@
 | `BASE_URL` | `https://your-domain.example.com` | 必须填正式公网 HTTPS 地址，影响 `/openapi.json` 的 `servers.url` |
 | `ACTION_API_KEY` | 一段 32 位以上随机字符串 | GPT Actions 调用 action 时使用的 Bearer token |
 | `CORS_ORIGINS` | `*` | GPT Actions 场景可保持 `*` |
+| `MEMORY_PROVIDER` | `supabase` | 启用外部长期记忆存储 |
+| `SUPABASE_URL` | `https://xxx.supabase.co` | Supabase 项目的 Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | `ey...` | 后端访问 Supabase 的服务密钥，只能放在云平台环境变量里 |
+| `MEMORY_TABLE` | `writing_memories` | 长期记忆表名 |
 
-不要把 `ACTION_API_KEY` 写进代码仓库；只放在云平台的 Environment Variables / Secrets 里。
+不要把 `ACTION_API_KEY`、`SUPABASE_SERVICE_ROLE_KEY` 写进代码仓库；只放在云平台的 Environment Variables / Secrets 里。
 
 ## 推荐方案 A：Render
 
@@ -25,6 +29,10 @@
    - `ACTION_API_KEY=<你的长随机密钥>`
    - 初次部署后拿到 Render 域名，例如 `https://actionapi-backend.onrender.com`
    - 回到环境变量里设置 `BASE_URL=https://actionapi-backend.onrender.com`
+   - `MEMORY_PROVIDER=supabase`
+   - `SUPABASE_URL=<你的 Supabase Project URL>`
+   - `SUPABASE_SERVICE_ROLE_KEY=<你的 Supabase service_role key>`
+   - `MEMORY_TABLE=writing_memories`
 4. 重新部署一次。
 5. 打开 `https://actionapi-backend.onrender.com/openapi.json`，确认 `servers.url` 是正式 HTTPS 地址。
 
@@ -74,6 +82,33 @@ docker run -d \
 ```
 
 需要在反向代理或云平台上开启 HTTPS。
+
+## Supabase 长期记忆表
+
+在 Supabase SQL Editor 里执行：
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.writing_memories (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  memory_type text not null default 'note',
+  title text not null,
+  content text not null,
+  tags text[] not null default '{}',
+  source text not null default '',
+  importance int not null default 3 check (importance between 1 and 5),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists writing_memories_updated_at_idx on public.writing_memories (updated_at desc);
+create index if not exists writing_memories_importance_idx on public.writing_memories (importance desc);
+create index if not exists writing_memories_tags_idx on public.writing_memories using gin (tags);
+```
+
+后端使用 `SUPABASE_SERVICE_ROLE_KEY` 从 Render 访问这张表。这个密钥不要填进 GPT Builder，GPT Actions 仍然只使用你的 `ACTION_API_KEY`。
 
 ## 上线后检查
 

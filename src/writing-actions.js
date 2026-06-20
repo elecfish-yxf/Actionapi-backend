@@ -12,6 +12,13 @@ const {
   searchLibrary
 } = require("./writing-library");
 const { humanizeWriting } = require("./humanizer");
+const {
+  deleteMemory,
+  getMemoryStatus,
+  listRecentMemories,
+  saveMemory,
+  searchMemories
+} = require("./memory-store");
 
 const categorySchema = {
   type: "string",
@@ -33,6 +40,30 @@ const searchResultSchema = {
     score: { type: "number" },
     snippet: { type: "string" },
     text: { type: "string" }
+  }
+};
+
+const memoryResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "title", "content", "memoryType", "tags", "source", "importance", "metadata", "createdAt", "updatedAt"],
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    content: { type: "string" },
+    memoryType: { type: "string" },
+    tags: {
+      type: "array",
+      items: { type: "string" }
+    },
+    source: { type: "string" },
+    importance: { type: "integer" },
+    metadata: {
+      type: "object",
+      additionalProperties: true
+    },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" }
   }
 };
 
@@ -430,7 +461,7 @@ const writingActions = [
     path: "/actions/writing/context-pack",
     summary: "Build a writing context pack",
     description:
-      "Build a compact, source-grounded context pack for a writing task. This is the best general action before drafting a chapter, scene or local detail.",
+      "Build a compact, source-grounded context pack for a writing task. This action also checks long-term memory by default before drafting.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -458,6 +489,15 @@ const writingActions = [
           type: "integer",
           minimum: 120,
           maximum: 1200
+        },
+        includeMemory: {
+          type: "boolean",
+          description: "Whether to search long-term memory before writing. Defaults to true."
+        },
+        memoryLimit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20
         }
       }
     },
@@ -475,14 +515,251 @@ const writingActions = [
         results: {
           type: "array",
           items: searchResultSchema
-        }
+        },
+        memoryConfigured: { type: "boolean" },
+        memoryResults: {
+          type: "array",
+          items: memoryResultSchema
+        },
+        memoryMessage: { type: "string" }
       },
-      ["task", "categories", "suggestedUse", "query", "resultCount", "results"]
+      ["task", "categories", "suggestedUse", "query", "resultCount", "results", "memoryConfigured", "memoryResults"]
+    ),
+    async handler(input) {
+      const contextPack = getContextPack(input);
+      const includeMemory = input.includeMemory !== false;
+      const memory = includeMemory
+        ? await searchMemories({
+            query: [input.task, input.focus].filter(Boolean).join(" "),
+            limit: input.memoryLimit || 6
+          })
+        : {
+            configured: false,
+            results: [],
+            message: "Long-term memory search was skipped for this request."
+          };
+
+      return {
+        ok: true,
+        ...contextPack,
+        memoryConfigured: Boolean(memory.configured),
+        memoryResults: memory.results || [],
+        memoryMessage: memory.message
+      };
+    }
+  },
+  {
+    id: "get_long_term_memory_status",
+    method: "POST",
+    path: "/actions/memory/status",
+    summary: "Get long-term memory status",
+    description:
+      "Check whether external long-term memory storage is configured. Use this before relying on memory actions.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {}
+    },
+    outputSchema: actionResultSchema(
+      {
+        provider: { type: "string" },
+        configured: { type: "boolean" },
+        table: { type: "string" },
+        message: { type: "string" }
+      },
+      ["provider", "configured", "table", "message"]
+    ),
+    async handler() {
+      return {
+        ok: true,
+        ...(await getMemoryStatus())
+      };
+    }
+  },
+  {
+    id: "search_long_term_memory",
+    method: "POST",
+    path: "/actions/memory/search",
+    summary: "Search long-term memory",
+    description:
+      "Search external long-term writing memory. The writing agent should call this before drafting when it needs prior decisions, user preferences, continuity notes, or saved story facts.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["query"],
+      properties: {
+        query: {
+          type: "string",
+          minLength: 1,
+          description: "Search query for saved memory, such as 陈渡口吻, 洛恩钟镇连续性, 用户偏好."
+        },
+        memoryType: {
+          type: "string",
+          description: "Optional type filter, such as preference, continuity, character, plot, style, note."
+        },
+        tag: {
+          type: "string",
+          description: "Optional tag filter."
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 30
+        }
+      }
+    },
+    outputSchema: actionResultSchema(
+      {
+        provider: { type: "string" },
+        configured: { type: "boolean" },
+        query: { type: "string" },
+        resultCount: { type: "integer" },
+        results: {
+          type: "array",
+          items: memoryResultSchema
+        },
+        message: { type: "string" }
+      },
+      ["provider", "configured", "query", "resultCount", "results"]
     ),
     async handler(input) {
       return {
         ok: true,
-        ...getContextPack(input)
+        ...(await searchMemories(input))
+      };
+    }
+  },
+  {
+    id: "save_long_term_memory",
+    method: "POST",
+    path: "/actions/memory/save",
+    summary: "Save long-term memory",
+    description:
+      "Save or update a durable memory item for future writing sessions. Use for stable user preferences, continuity facts, approved style rules, character decisions, and plot decisions.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "content"],
+      properties: {
+        id: {
+          type: "string",
+          description: "Optional existing memory id. If provided, the memory is updated."
+        },
+        title: {
+          type: "string",
+          minLength: 1
+        },
+        content: {
+          type: "string",
+          minLength: 1
+        },
+        memoryType: {
+          type: "string",
+          description: "Type such as preference, continuity, character, plot, style, note."
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" }
+        },
+        source: {
+          type: "string",
+          description: "Where this memory came from, such as user, draft_review, chapter_003."
+        },
+        importance: {
+          type: "integer",
+          minimum: 1,
+          maximum: 5
+        },
+        metadata: {
+          type: "object",
+          additionalProperties: true
+        }
+      }
+    },
+    outputSchema: actionResultSchema(
+      {
+        provider: { type: "string" },
+        configured: { type: "boolean" },
+        saved: { type: "boolean" },
+        memory: memoryResultSchema,
+        message: { type: "string" }
+      },
+      ["provider", "configured", "saved"]
+    ),
+    async handler(input) {
+      return {
+        ok: true,
+        ...(await saveMemory(input))
+      };
+    }
+  },
+  {
+    id: "list_recent_long_term_memories",
+    method: "POST",
+    path: "/actions/memory/recent",
+    summary: "List recent long-term memories",
+    description:
+      "List recently updated durable memories for inspection or debugging.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 30
+        }
+      }
+    },
+    outputSchema: actionResultSchema(
+      {
+        provider: { type: "string" },
+        configured: { type: "boolean" },
+        resultCount: { type: "integer" },
+        results: {
+          type: "array",
+          items: memoryResultSchema
+        },
+        message: { type: "string" }
+      },
+      ["provider", "configured", "resultCount", "results"]
+    ),
+    async handler(input) {
+      return {
+        ok: true,
+        ...(await listRecentMemories(input))
+      };
+    }
+  },
+  {
+    id: "delete_long_term_memory",
+    method: "POST",
+    path: "/actions/memory/delete",
+    summary: "Delete long-term memory",
+    description:
+      "Delete a durable memory item by id. Use sparingly, mainly when a saved memory is wrong or obsolete.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: {
+        id: { type: "string", minLength: 1 }
+      }
+    },
+    outputSchema: actionResultSchema(
+      {
+        provider: { type: "string" },
+        configured: { type: "boolean" },
+        deleted: { type: "boolean" },
+        id: { type: "string" },
+        message: { type: "string" }
+      },
+      ["provider", "configured", "deleted"]
+    ),
+    async handler(input) {
+      return {
+        ok: true,
+        ...(await deleteMemory(input))
       };
     }
   },

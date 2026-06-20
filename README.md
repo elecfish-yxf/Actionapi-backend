@@ -61,6 +61,11 @@ Invoke-RestMethod `
 | `get_location_reference` | `/actions/writing/location-reference` | 获取地域、路线、小地点、市井生活、饮食和民俗参考 |
 | `get_chapter_outline` | `/actions/writing/chapter-outline` | 获取第一卷 120 章章纲、章节节奏和开篇材料 |
 | `get_writing_context_pack` | `/actions/writing/context-pack` | 按写作任务自动组装上下文包，适合正文生成前调用 |
+| `get_long_term_memory_status` | `/actions/memory/status` | 检查外部长期记忆是否已经配置好 |
+| `search_long_term_memory` | `/actions/memory/search` | 写作前检索长期记忆里的偏好、连续性、人物和剧情决策 |
+| `save_long_term_memory` | `/actions/memory/save` | 保存稳定偏好、已确认设定、剧情决策和风格规则 |
+| `list_recent_long_term_memories` | `/actions/memory/recent` | 查看最近更新的长期记忆 |
+| `delete_long_term_memory` | `/actions/memory/delete` | 删除错误或过期的长期记忆 |
 | `check_draft_against_writing_rules` | `/actions/writing/check-draft` | 检查草稿或剧情想法是否撞上禁写方向，并返回规则来源 |
 | `humanize_writing` | `/actions/writing/humanize` | 诊断并轻量优化正文，让文字更贴近人类写作习惯 |
 
@@ -72,12 +77,53 @@ Invoke-RestMethod `
 4. `humanize_writing`：生成后做去模板化、去空泛总结、段落呼吸和对白自然度检查。
 5. `check_draft_against_writing_rules`：最后做一次硬规则校验。
 
+长期记忆推荐流程：
+
+1. 每次正式写作前，优先调用 `get_writing_context_pack`。它现在默认会同时检索长期记忆，返回 `memoryResults`。
+2. 如果任务只需要查记忆，直接调用 `search_long_term_memory`，例如检索“用户偏好”“人物口吻”“上一章决定”。
+3. 当用户确认了稳定偏好、人物设定、剧情决策、伏笔安排或写法规则后，调用 `save_long_term_memory` 保存。
+4. 如果记忆被证明过期或错误，再调用 `delete_long_term_memory` 删除。
+
 `humanize_writing` 不是另一个大模型，它会返回：
 
 - `findings`：哪里像 AI 腔、空泛总结、说明文连接词、过长句、厚段落。
 - `styleRules`：适合本项目的自然化写作规则。
 - `rewritePrompt`：给 GPT agent 继续改写用的指令。
 - `humanizedText`：后端做的轻量机械修订，适合当参考，不建议无脑覆盖最终稿。
+
+## 长期记忆存储
+
+后端支持用 Supabase 作为外部长期记忆库。Render 上需要添加这些环境变量：
+
+- `MEMORY_PROVIDER=supabase`
+- `SUPABASE_URL=<你的 Supabase Project URL>`
+- `SUPABASE_SERVICE_ROLE_KEY=<你的 Supabase service_role key>`
+- `MEMORY_TABLE=writing_memories`
+
+在 Supabase SQL Editor 里执行：
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.writing_memories (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  memory_type text not null default 'note',
+  title text not null,
+  content text not null,
+  tags text[] not null default '{}',
+  source text not null default '',
+  importance int not null default 3 check (importance between 1 and 5),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists writing_memories_updated_at_idx on public.writing_memories (updated_at desc);
+create index if not exists writing_memories_importance_idx on public.writing_memories (importance desc);
+create index if not exists writing_memories_tags_idx on public.writing_memories using gin (tags);
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` 只放在 Render 的环境变量里，不要填进 GPT Actions，也不要提交到 GitHub。
 
 ## 网页版 GPT Actions 接入
 

@@ -7,7 +7,7 @@ const errorResponseSchema = {
   properties: {
     ok: {
       type: "boolean",
-      const: false
+      enum: [false]
     },
     error: {
       type: "object",
@@ -196,7 +196,7 @@ function buildOpenApiSpec(options = {}) {
   }
 
   return {
-    openapi: "3.1.0",
+    openapi: "3.0.3",
     info: {
       title: "Action API Backend",
       version: "0.1.0",

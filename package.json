@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/action-registry.js && node --check src/openapi.js && node --check src/writing-library.js && node --check src/humanizer.js && node --check src/writing-actions.js && node --check scripts/export-openapi.js",
+    "check": "node --check src/server.js && node --check src/action-registry.js && node --check src/openapi.js && node --check src/writing-library.js && node --check src/humanizer.js && node --check src/memory-store.js && node --check src/writing-actions.js && node --check scripts/export-openapi.js",
     "export:openapi": "node scripts/export-openapi.js outputs/openapi.actionapi.json"
   }
 }
