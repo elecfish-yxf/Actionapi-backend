@@ -60,10 +60,23 @@ function normalizeMemory(row) {
 }
 
 async function supabaseFetch(config, path, options = {}) {
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
-    ...options,
-    headers: supabaseHeaders(config, options.headers || {})
-  });
+  const url = `${config.supabaseUrl}/rest/v1/${path}`;
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: supabaseHeaders(config, options.headers || {})
+    });
+  } catch (error) {
+    const cause = error && error.cause ? error.cause : {};
+    const details = [
+      error && error.message ? error.message : "request failed",
+      cause.code ? `code=${cause.code}` : "",
+      cause.hostname ? `host=${cause.hostname}` : "",
+      cause.reason ? `reason=${cause.reason}` : ""
+    ].filter(Boolean).join("; ");
+    throw new Error(`Supabase connection failed: ${details}. Check SUPABASE_URL and Render network access.`);
+  }
 
   const text = await response.text();
   let payload = null;
