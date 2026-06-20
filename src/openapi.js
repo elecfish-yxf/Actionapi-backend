@@ -196,7 +196,7 @@ function buildOpenApiSpec(options = {}) {
   }
 
   return {
-    openapi: "3.0.3",
+    openapi: "3.1.0",
     info: {
       title: "Action API Backend",
       version: "0.1.0",
