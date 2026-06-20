@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: actionapi-backend
+    env: node
+    plan: free
+    buildCommand: npm run check
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: BASE_URL
+        sync: false
+      - key: ACTION_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
